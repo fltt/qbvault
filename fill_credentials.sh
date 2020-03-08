@@ -15,47 +15,77 @@
 
 test "$QUTE_MODE" = command || exit 0
 
+escape() {
+  echo "$1" | sed -e "s,\\\\,\\\\\\\\,g;s,\",\\\\\",g"
+}
+
+corrupt() {
+  echo "jseval -q alert(\"The qbvault file is corrupted!\");" >>"$QUTE_FIFO"
+  exit 3
+}
+
 cd "$(dirname "$0")"
 URL=$(echo "$QUTE_URL" | sed -e 's,^\([^?]*\)?.*$,\1,')
 
-./qbvault.sh read "$URL" | (na=0
-FORM_SETUP=""
+./qbvault.sh -R -u "$URL" | (FORM_SETUP=""
 while read action; do
-  action=$(echo "$action" | sed -e "s,\",\\\\\",g")
+  action=$(escape "$action")
   FORM_SETUP="$FORM_SETUP\
   if (forms[i].action.startsWith(\"$action\")) {
     var inputs = forms[i].getElementsByTagName(\"input\");
     for (var j = 0; j < inputs.length; ++j) {
 "
-  while read ntoken field_name; do
-    if test -z "$ntoken"; then
-      break
-    fi
-    read vtoken field_value
-    if test "$ntoken" != n || test "$vtoken" != v; then
-      echo "jseval -q alert(\"The qbvault file is corrupted!\");" >>"$QUTE_FIFO"
-      exit 2
-    fi
-    name=$(echo "$field_name" | sed -e "s,\",\\\\\",g")
-    value=$(echo "$field_value" | sed -e "s,\",\\\\\",g")
-    FORM_SETUP="$FORM_SETUP\
+  read token data
+  while test -n "$token"; do
+    test "$token" = n || corrupt
+    field_name="$data"
+    CMD=""
+    INPUT=""
+    while true; do
+      read token data
+      case "$token" in
+        c) test -n "$data" || corrupt
+           CMD="\"$data\"" ;;
+        a) CMD="$CMD \"$data\"" ;;
+        v) if test -z "$INPUT"; then
+             INPUT="$data"
+           else
+             INPUT="$INPUT
+$data"
+           fi ;;
+        *) if test -z "$CMD"; then
+             field_value="$INPUT"
+           else
+             field_value=$(echo "$INPUT" | eval "$CMD")
+             result=$?
+             if test $result -ne 0; then
+               command=$(escape "$CMD")
+               echo "jseval -q alert(\"Command failed: $command\");" >>"$QUTE_FIFO"
+               exit 0
+             fi
+           fi
+           name=$(escape "$field_name")
+           value=$(escape "$field_value")
+           FORM_SETUP="$FORM_SETUP\
       if (inputs[j].name == \"$name\")
         inputs[j].value = \"$value\";
 "
+           break ;;
+      esac
+    done
   done
   FORM_SETUP="$FORM_SETUP\
     }
   }
 "
-  na=$((na + 1))
 done
-if test $na -gt 0; then
+if test -z "$FORM_SETUP"; then
+  echo "jseval -q alert(\"No credentials found.\");" >>"$QUTE_FIFO"
+else
   JS_SCRIPT="var forms = document.getElementsByTagName(\"form\");
 for (var i = 0; i < forms.length; ++i) {
 $FORM_SETUP\
 }"
   JS_SCRIPT=$(echo "$JS_SCRIPT" | tr '\n' ' ')
   echo "jseval -q $JS_SCRIPT" >>"$QUTE_FIFO"
-else
-  echo "jseval -q alert(\"No credentials found.\");" >>"$QUTE_FIFO"
 fi)

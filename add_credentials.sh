@@ -34,17 +34,17 @@ for (var i = 0; i < forms.length; ++i) {
     ++ncommands;
     if (ncommands > 1)
         fields_list += \"<p>Command \" + ncommands + \":</p>\";
-    fields_list += \"<pre>qbvault.sh add \\\"$URL\\\" \\\"\";
+    fields_list += \"<pre>qbvault.sh -A -u \\\"$URL\\\" -a \\\"\";
     fields_list += form.action.split(\"?\")[0].replace(/([\\\\\"\$])/g, \"\\\\\$1\");
     fields_list += \"\\\"\";
     for (var j = 0; j < inputs.length; ++j) {
         var input = inputs[j];
         if ((input.type == \"hidden\") || (input.type == \"submit\") || (input.name == null) || (input.name == \"\"))
             continue;
-        fields_list += \" \\\"\";
+        fields_list += \" -n \\\"\";
         var name = input.name.replace(/([\\\\\"\$])/g, \"\\\\\$1\");
         fields_list += name;
-        fields_list += \"\\\" '\";
+        fields_list += \"\\\" -l '\";
         if (input.labels && (input.labels.length > 0))
             fields_list += escape(input.labels[0].innerText);
         fields_list += \"'\";

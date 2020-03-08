@@ -21,63 +21,136 @@ GPG_CA=$(which gpg-connect-agent)
 SHA256=$(which sha256)
 
 if ! test -x "$GPG"; then
-  echo "ERROR: gpg2 not found."
+  echo "gpg2 not found"
   exit 2
 fi
 if ! test -x "$GPG_CA"; then
-  echo "ERROR: gpg-connect-agent not found."
+  echo "gpg-connect-agent not found"
   exit 2
 fi
 if ! test -x "$SHA256"; then
-  echo "ERROR: sha256 not found."
+  echo "sha256 not found"
   exit 2
 fi
 
-COMMAND="$1"
-URL="$2"
-ACTION="$3"
-shift 3
+ADD=""
+READ=""
+REMOVE=""
+PASSWORD=""
+
+URL=""
+ACTION=""
 
 usage() {
   local sn
   sn=$(basename "$0")
   echo
   echo "Usage:"
-  echo "  $sn add <url> <action> [<name> <label>]..."
-  echo "  $sn read [<url>]"
-  echo "  $sn remove <url> [<action>]"
-  echo "  $sn updatepassword"
+  echo "  $sn -A -u <url> [-a <action>] {-n <name> [-l <label> | -p <argument> | -c <command> [-p <argument> | -l <label>] ...]} ..."
+  echo "  $sn -R [-u <url>]"
+  echo "  $sn -D -u <url> [-a <action>]"
+  echo "  $sn -U"
   echo
   echo "See README.md, section \"qbvault.sh\" for details."
   echo
 }
 
-ADD=""
-PASSWORD=""
-REMOVE=""
+only_one() {
+  if test -n "$ADD$READ$REMOVE$PASSWORD"; then
+    echo "Only one -A, -R, -D or -U option can be specified"
+    usage
+    exit 1
+  fi
+}
 
-case "$COMMAND" in
-add)
-  if test -z "$URL" || test -z "$ACTION"; then
-    usage
-    exit 1
+check_n_option() {
+  if test $n_names -gt 0; then
+    eval "cmd=\$command_${n_names}"
+    eval "nl=\$n_labels_${n_names}"
+    eval "na=\$n_arguments_${n_names}"
+    if test -z "$cmd" && test $nl -eq 0 && test $na -eq 0; then
+      echo "Each -n option requires at least one -l, -p or -c option"
+      usage
+      exit 1
+    fi
   fi
-  ADD=X
-  REMOVE=X ;;
-read)
-  ;;
-remove)
-  if test -z "$URL"; then
-    usage
-    exit 1
-  fi
-  REMOVE=X ;;
-updatepassword)
-  PASSWORD=X ;;
-*)
+}
+
+escape_blanks() {
+  echo "$1" | sed -e 's, ,%20,g;s,	,%09,g'
+}
+
+n_names=0
+# name_$i
+# command_$i
+# n_labels_$i
+# label_$i_$j
+# n_arguments_$i
+# argument_$i_$j
+
+while getopts "Aa:n:l:c:p:Ru:DU" option; do
+  case "$option" in
+    A) only_one
+       ADD=X
+       REMOVE=X ;;
+    a) ACTION="$OPTARG" ;;
+    n) check_n_option
+       n_names=$((n_names + 1))
+       eval "n_labels_${n_names}=0"
+       eval "n_arguments_${n_names}=0"
+       eval "name_${n_names}=\"\$OPTARG\"" ;;
+    l) eval "nl=\$n_labels_${n_names}"
+       nl=$((nl + 1))
+       eval "n_labels_${n_names}=\$nl"
+       eval "label_${n_names}_${nl}=\"\$OPTARG\"" ;;
+    c) if test -z "$OPTARG"; then
+         echo "Empty -c option argument"
+         usage
+         exit 1
+       fi
+       eval "command_${n_names}=\"\$OPTARG\"" ;;
+    p) eval "na=\$n_arguments_${n_names}"
+       na=$((na + 1))
+       eval "n_arguments_${n_names}=\$na"
+       eval "argument_${n_names}_${na}=\"\$OPTARG\"" ;;
+    R) only_one
+       READ=X ;;
+    u) URL="$OPTARG" ;;
+    D) only_one
+       REMOVE=X ;;
+    U) only_one
+       PASSWORD=X ;;
+    *) usage
+       exit 1;;
+  esac
+done
+
+check_n_option
+
+if test -z "$ADD$READ$REMOVE$PASSWORD"; then
   usage
-  exit 0 ;;
-esac
+  exit 0
+fi
+
+if test -n "$ADD"; then
+  if test $n_names -eq 0; then
+    echo "-A option requires one or more -n options"
+    usage
+    exit 1
+  fi
+  if test -z "$URL"; then
+    echo "-A option requires the -u option"
+    usage
+    exit 1
+  fi
+  test -z "$ACTION" && ACTION="$URL"
+elif test -n "$REMOVE"; then
+  if test -z "$URL"; then
+    echo "-D option requires the -u option"
+    usage
+    exit 1
+  fi
+fi
 
 TMP_FILE1=$(mktemp)
 TRAP_FILES="\"$TMP_FILE1\""
@@ -93,12 +166,12 @@ else
   fi
 fi
 
-trap "rm $TRAP_FILES" EXIT
+trap "rm -P $TRAP_FILES" EXIT
 
 if test -f "$QB_VAULT_FILE"; then
   if ! "$GPG" -dq "$QB_KEY_FILE" | "$GPG" -dq --passphrase-fd 0 --batch --pinentry-mode loopback "$QB_VAULT_FILE" >"$TMP_FILE1"; then
-    echo "ERROR: Decryption failed."
-    exit 2
+    echo "Decryption failed"
+    exit 3
   fi
 fi
 
@@ -117,34 +190,77 @@ fi
 
 if test -n "$ADD"; then
   echo "$URL#$ACTION" >>"$TMP_FILE2"
-  while test -n "$1"; do
-    if test -z "$2"; then
-      label="$1"
+  i=0
+  while test $i -lt $n_names; do
+    i=$((i + 1))
+    eval "name=\"\$name_${i}\""
+    eval "cmd=\"\$command_${i}\""
+    if test -z "$cmd"; then
+      eval "na=\$n_arguments_${i}"
+      if test $na -gt 0; then
+        eval "argument=\"\$argument_${i}_1\""
+        echo "n $name" >>"$TMP_FILE2"
+        echo "v $argument" >>"$TMP_FILE2"
+      else
+        eval "label=\"\$label_${i}_1\""
+        if test -z "$label"; then
+          label="$name"
+        fi
+        label=$(escape_blanks "$label")
+        echo "get_passphrase --data X X $label X" | "$GPG_CA" >"$TMP_FILE3"
+        if grep -q '^ERR ' "$TMP_FILE3"; then
+          echo "Could not read user input:"
+          cat "$TMP_FILE3"
+          exit 0
+        fi
+        if grep -q '^D ' "$TMP_FILE3"; then
+          echo "n $name" >>"$TMP_FILE2"
+          sed -ne 's,^D \(.*\)$,v \1,p' "$TMP_FILE3" >>"$TMP_FILE2"
+        else
+          echo "Skipping field \"$name\"."
+        fi
+      fi
     else
-      label="$2"
+      echo "n $name" >>"$TMP_FILE2"
+      echo "c $cmd" >>"$TMP_FILE2"
+      eval "na=\$n_arguments_${i}"
+      j=0
+      while test $j -lt $na; do
+        j=$((j + 1))
+        eval "argument=\"\$argument_${i}_${j}\""
+        echo "a $argument" >>"$TMP_FILE2"
+      done
+      eval "nl=\$n_labels_${i}"
+      j=0
+      while test $j -lt $nl; do
+        j=$((j + 1))
+        eval "label=\"\$label_${i}_${j}\""
+        if test -z "$label"; then
+          label="Input line $j"
+        fi
+        label=$(escape_blanks "$label")
+        echo "get_passphrase --data X X $label X" | "$GPG_CA" >"$TMP_FILE3"
+        if grep -q '^ERR ' "$TMP_FILE3"; then
+          echo "Could not read user input:"
+          cat "$TMP_FILE3"
+          exit 0
+        fi
+        if grep -q '^D ' "$TMP_FILE3"; then
+          sed -ne 's,^D \(.*\)$,v \1,p' "$TMP_FILE3" >>"$TMP_FILE2"
+        else
+          echo v >>"$TMP_FILE2"
+        fi
+      done
     fi
-    echo "get_passphrase --data X X $label X" | "$GPG_CA" >"$TMP_FILE3"
-    if grep -q '^ERR ' "$TMP_FILE3"; then
-      echo "ERROR: Could not read user input:"
-      cat "$TMP_FILE3" | sed -e 's,^,     | ,'
-      exit 0
-    fi
-    if grep -q '^D ' "$TMP_FILE3"; then
-      echo "n $1" >>"$TMP_FILE2"
-      sed -ne 's,^D \(.*\)$,v \1,p' "$TMP_FILE3" >>"$TMP_FILE2"
-    else
-      echo "INFO: Skipping field \"$1\"."
-    fi
-    shift 2
   done
   echo >>"$TMP_FILE2"
 fi
 
 if test -n "$PASSWORD" || ! test -f "$QB_KEY_FILE"; then
-  echo "INFO: Creating a new keystore..."
+  echo "Creating a new keystore..."
   mkdir -p "$(dirname "$QB_KEY_FILE")"
   if ! "$GPG" --gen-random 2 32 | "$SHA256" | "$GPG" -c --personal-cipher-preferences AES256 --yes -o "$QB_KEY_FILE"; then
-    echo "ERROR: Could not create a new keystore."
+    echo "Could not create a new keystore"
     exit 3
   fi
 fi
@@ -153,14 +269,14 @@ if test -n "$ADD$PASSWORD$REMOVE"; then
   cmp -s "$TMP_FILE1" "$TMP_FILE2" || PASSWORD=X
   if test -n "$PASSWORD"; then
     if ! "$GPG" -dq "$QB_KEY_FILE" | "$GPG" -c --passphrase-fd 0 --batch --pinentry-mode loopback --personal-cipher-preferences AES256 --yes -o "$QB_VAULT_FILE" "$TMP_FILE2"; then
-      echo "ERROR: Encryption failed."
-      exit 4
+      echo "Encryption failed"
+      exit 3
     fi
   fi
 else
   if test -z "$URL"; then
     cat "$TMP_FILE1"
   else
-    sed -ne "\\|^$URLE#|,/^\$/p" "$TMP_FILE1" | sed -e '1s,^[^#]*#,,'
+    sed -ne "\\|^$URLE#|,/^\$/p" "$TMP_FILE1" | sed -e 's,^[^#]*#,,'
   fi
 fi
