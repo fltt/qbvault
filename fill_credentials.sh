@@ -19,11 +19,6 @@ escape() {
   echo "$1" | sed -e "s,\\\\,\\\\\\\\,g;s,\",\\\\\",g"
 }
 
-corrupt() {
-  echo "jseval -q alert(\"The qbvault file is corrupted!\");" >>"$QUTE_FIFO"
-  exit 3
-}
-
 cd "$(dirname "$0")"
 URL=$(echo "$QUTE_URL" | sed -e 's,^\([^?]*\)?.*$,\1,')
 
@@ -35,44 +30,16 @@ while read action; do
     var inputs = forms[i].getElementsByTagName(\"input\");
     for (var j = 0; j < inputs.length; ++j) {
 "
-  read token data
-  while test -n "$token"; do
-    test "$token" = n || corrupt
-    field_name="$data"
-    CMD=""
-    INPUT=""
-    while true; do
-      read token data
-      case "$token" in
-        c) test -n "$data" || corrupt
-           CMD="\"$data\"" ;;
-        a) CMD="$CMD \"$data\"" ;;
-        v) if test -z "$INPUT"; then
-             INPUT="$data"
-           else
-             INPUT="$INPUT
-$data"
-           fi ;;
-        *) if test -z "$CMD"; then
-             field_value="$INPUT"
-           else
-             field_value=$(echo "$INPUT" | eval "$CMD")
-             result=$?
-             if test $result -ne 0; then
-               command=$(escape "$CMD")
-               echo "jseval -q alert(\"Command failed: $command\");" >>"$QUTE_FIFO"
-               exit 0
-             fi
-           fi
-           name=$(escape "$field_name")
-           value=$(escape "$field_value")
-           FORM_SETUP="$FORM_SETUP\
+  read field_name
+  while test -n "$field_name"; do
+    read field_value
+    name=$(escape "$field_name")
+    value=$(escape "$field_value")
+    FORM_SETUP="$FORM_SETUP\
       if (inputs[j].name == \"$name\")
         inputs[j].value = \"$value\";
 "
-           break ;;
-      esac
-    done
+    read field_name
   done
   FORM_SETUP="$FORM_SETUP\
     }

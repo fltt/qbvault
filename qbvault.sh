@@ -33,10 +33,11 @@ if ! test -x "$SHA256"; then
   exit 2
 fi
 
-ADD=""
-READ=""
-REMOVE=""
-PASSWORD=""
+ADD=
+READ=
+RAW=
+REMOVE=
+PASSWORD=
 
 URL=""
 ACTION=""
@@ -47,7 +48,7 @@ usage() {
   echo
   echo "Usage:"
   echo "  $sn -A -u <url> [-a <action>] {-n <name> [-l <label> | -p <argument> | -c <command> [-p <argument> | -l <label>] ...]} ..."
-  echo "  $sn -R [-u <url>]"
+  echo "  $sn -R [-u <url> [-r]]"
   echo "  $sn -D -u <url> [-a <action>]"
   echo "  $sn -U"
   echo
@@ -80,6 +81,11 @@ escape_blanks() {
   echo "$1" | sed -e 's, ,%20,g;s,	,%09,g'
 }
 
+corrupt() {
+  echo "Corrupt keystore"
+  exit 4
+}
+
 n_names=0
 # name_$i
 # command_$i
@@ -88,13 +94,18 @@ n_names=0
 # n_arguments_$i
 # argument_$i_$j
 
-while getopts "Aa:n:l:c:p:Ru:DU" option; do
+while getopts "Aa:n:l:c:p:Rru:DU" option; do
   case "$option" in
     A) only_one
        ADD=X
        REMOVE=X ;;
     a) ACTION="$OPTARG" ;;
     n) check_n_option
+       if test -z "$OPTARG"; then
+         echo "Empty arg for -n option"
+         usage
+         exit 1
+       fi
        n_names=$((n_names + 1))
        eval "n_labels_${n_names}=0"
        eval "n_arguments_${n_names}=0"
@@ -115,6 +126,7 @@ while getopts "Aa:n:l:c:p:Ru:DU" option; do
        eval "argument_${n_names}_${na}=\"\$OPTARG\"" ;;
     R) only_one
        READ=X ;;
+    r) RAW=X ;;
     u) URL="$OPTARG" ;;
     D) only_one
        REMOVE=X ;;
@@ -153,20 +165,10 @@ elif test -n "$REMOVE"; then
 fi
 
 TMP_FILE1=$(mktemp)
-TRAP_FILES="\"$TMP_FILE1\""
+TMP_FILE2=$(mktemp)
+TMP_FILE3=$(mktemp)
 
-if test -z "$ADD$REMOVE"; then
-  TMP_FILE2="$TMP_FILE1"
-else
-  TMP_FILE2=$(mktemp)
-  TRAP_FILES="$TRAP_FILES \"$TMP_FILE2\""
-  if test -n "$ADD"; then
-    TMP_FILE3=$(mktemp)
-    TRAP_FILES="$TRAP_FILES \"$TMP_FILE3\""
-  fi
-fi
-
-trap "rm -P $TRAP_FILES" EXIT
+trap "rm -P \"$TMP_FILE1\" \"$TMP_FILE2\" \"$TMP_FILE3\"" EXIT
 
 if test -f "$QB_VAULT_FILE"; then
   if ! "$GPG" -dq "$QB_KEY_FILE" | "$GPG" -dq --passphrase-fd 0 --batch --pinentry-mode loopback "$QB_VAULT_FILE" >"$TMP_FILE1"; then
@@ -276,7 +278,46 @@ if test -n "$ADD$PASSWORD$REMOVE"; then
 else
   if test -z "$URL"; then
     cat "$TMP_FILE1"
-  else
+  elif test -n "$RAW"; then
     sed -ne "\\|^$URLE#|,/^\$/p" "$TMP_FILE1" | sed -e 's,^[^#]*#,,'
+  else
+    sed -ne "\\|^$URLE#|,/^\$/p" "$TMP_FILE1" | sed -e 's,^[^#]*#,,' | while read action; do
+      echo "$action"
+      read token data
+      while test -n "$token"; do
+        test "$token" = n || corrupt
+        echo "$data"
+        cmd=""
+        input=""
+        while true; do
+          read token data
+          case "$token" in
+            c) test -n "$data" || corrupt
+               cmd="\"$data\"" ;;
+            a) cmd="$cmd \"$data\"" ;;
+            v) if test -z "$input"; then
+                 input="$data"
+               else
+                 input="$input
+$data"
+               fi ;;
+            *) if test -z "$cmd"; then
+                 echo "$input"
+               else
+                 echo "$input" | eval "$cmd" >"$TMP_FILE3"
+                 result=$?
+                 if test $result -ne 0; then
+                   echo "Command failed: $cmd"
+                   exit 5
+                 fi
+                 head -1 "$TMP_FILE3"
+               fi
+               break ;;
+          esac
+        done
+      done
+      echo
+    done >"$TMP_FILE2"
+    cat "$TMP_FILE2"
   fi
 fi
