@@ -43,11 +43,16 @@ URL=""
 ACTION=""
 
 usage() {
-  local sn
+  local sn ss
   sn=$(basename "$0")
+  ss=$(echo "$sn" | sed -e 's,., ,g')
   echo
   echo "Usage:"
-  echo "  $sn -A -u <url> [-a <action>] {-n <name> [-l <label> | -p <argument> | -c <command> [-p <argument> | -l <label>] ...]} ..."
+  echo "  $sn -A -u <url> [-a <action>]"
+  echo "  $ss {-n <name> [-p <value> |"
+  echo "  $ss             -l <label> |"
+  echo "  $ss             -c <command> [-p <argument> |"
+  echo "  $ss                           -l <label>] ...]} ..."
   echo "  $sn -R [-u <url> [-r]]"
   echo "  $sn -D -u <url> [-a <action>]"
   echo "  $sn -U"

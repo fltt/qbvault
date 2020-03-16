@@ -13,7 +13,7 @@ The scripts require:
 * the *GNU Privacy Guard* suite (actually, `gpg2`, `gpg-agent` and
   `gpg-connect-agent`)
 * `sha256`
-* a bunch of utils any modern Unix OS has (`sh`, `sed`, `grep`, ecc.)
+* a bunch of utils any modern Unix OS has (`sh`, `sed`, `grep`, etc.)
 
 I've tested these scripts in *FreeBSD*.
 With other OSes you may need to tweak them: e.g., in *Linux*
@@ -30,7 +30,7 @@ Put a symbolic link in your PATH pointing to the `qbvault.sh` script.
 > directory, as `fill_credentials.sh` needs to find `qbvault.sh` for
 > its operation.
 
-Run the following commands in *qutebrowser*:
+Run (once) the following commands in *qutebrowser*:
 
 ```
 :bind pa spawn --userscript /path/to/add_credentials.sh
@@ -57,9 +57,8 @@ copy, paste in a terminal and run.
 > **NOTE**: To restore the page, just reload it -- don't move back in
 > history.
 
-The number of commands shown depends on the number of forms contained in
-the page -- choose the one relevant to you.
-You may also run them all, should you need to fill all the forms.
+For each form, a `qbvault.sh` command will be prepared -- choose the
+one(s) relevant to you.
 
 If it is the first time you run `qbvault.sh`, you will be asked to enter
 (twice) a passphrase to create a new keystore.
@@ -80,7 +79,7 @@ press `pf` (or whatever you chose).
 You may be asked again to enter (once) the passphrase to unlock the
 keystore.
 How often you have to enter the passphrase depends on your configuration
-of the *GNU Privacy Guard*.
+of `gpg-agent`'s `default-cache-ttl` option (see `gpgconf(1)`).
 
 Shortcomings
 ------------
@@ -90,11 +89,11 @@ The following are a few cases I stumbled on while testing them:
 * if the login form is loaded inside an `<iframe/>` from a different
   domain name than the main page, the `add_credentials.sh` script will
   be unable to access the forms
-* if the fields in the forms are renamed, `fill_credentials.sh` will be
-  unable to find and fill them
+* if the fields in the forms are renamed by a site update,
+  `fill_credentials.sh` will be unable to find and fill them
 * if there are no forms, the scripts will be unable to work -- a few
-  sites out there make use of Javascript to store the data in variables
-  and then invoke the login service via AJAX
+  sites out there make use of *Javascript* to store the data in
+  variables and then invoke the login service via *AJAX*
 
 qbvault.sh
 ----------
@@ -110,39 +109,102 @@ If, however, the passphrase is read from another file (i.e.,
 `qbkey.gpg`), you will be asked to enter the passphrase (to decrypt
 `qbkey.gpg`) only once.
 
-Four commands are available:
+Four operations are available -- add (`-A`), read (`-R`), delete (`-D`)
+and update password (`-U`):
 
 ```
-qbvault.sh add *page_url* *form_action_url* [*field_name* *field_label*]...
-qbvault.sh read [*page_url*]
-qbvault.sh remove *page_url* [*form_action_url*]
-qbvault.sh updatepassword
+qbvault.sh -A -u <page_url> [-a <form_action_url>]
+           {-n <field_name> [-p <field_value> |
+                             -l <field_label> |
+                             -c <command> [-p <command_argument> |
+                                           -l <argument_label>] ...]} ...
+qbvault.sh -R [-u <page_url> [-r]]
+qbvault.sh -D -u <page_url> [-a <form_action_url>]
+qbvault.sh -U
 ```
 
-To `add` new entries, you must specify:
+To add (`-A`) new entries, you must specify:
 
-* the URL of the page containing the forms to fill (*page_url*)
-* the URL in the action attribute of the form (*form_action_url*) --
-  this is used to identify the form to fill
-* and for each field to fill:
+* the URL of the page containing the forms to fill (`-u <page_url>`)
+* the URL in the action attribute of the form (`-u <form_action_url>`)
+  -- this is used to identify the form to fill
+* and for each field to fill, the name of the field (`-n <field_name>`)
+  and:
 
-  * the value of the name attribute of the input element inside the form
-    (*field_name*)
-  * the label assigned to the input element (*field_label*) -- this is
-    only used to show the user a user-friendly name; if empty the value
-    of *field_name* will be used instead
+  * the value of the field (`-p <field_value>`), or
+  * the label to be shown to the user by `gpg-agent`
+    (`-l <field_label>`) -- if empty `<field_name>` will be used
+    instead, or
+  * the command to run to compute the value to be used for the field
+    (`-c <command>`) and
+  * the (optional) arguments for the command (`-p <command_argument>`
+    and `-l <argument_label>`)
 
-To `read` the entries in the keystore, you may specify the URL of the
-page (*page_url*) whose entries should be read.
-If no URL is specified, all the entries are read.
+Use `-l` to pass sensitive data, e.g., password, credit card numbers and
+the like.
+Use `-p` for non-sensitive ones.
+Or use `-c` if the value is dynamic and can be computed by running a
+script or command (e.g., OTP tokens).
+If the value is dynamic but cannot be computed, then I guess you should
+ignore the field in question and just skip it.
 
-To `remove` entries from the keystore, you must specify the URL of the
-page (*page_url*) whose entries must be removed.
+When `-l` is used, `gpg-agent` will be invoked to ask the user to enter
+the sensitive data.
+The parameter passed to `-l` is a *label* to be shown to the user in the
+input form.
+
+When `-p` is used, you pass it the actual value for the field.
+As values specified through the `-p` option are visible to anyone
+executing a simple `ps`, you should use it only for non-sensitive data.
+
+When a command is used to fill the field, only the first line returned
+in its standard output will be used.
+Everything else returned is ignored.
+Standard error will pass-through to `qbvault.sh` standard error output.
+
+As for the command arguments, they are specified by means of the `-l`
+and `-p` options.
+Everything said above about the `-l` and `-p` options, apply to the
+command arguments as well, with the following clarifications:
+
+* multiple `-p` and `-l` can be specified
+* arguments specified by means of the `-p` option are passed to the
+  command as command-line arguments, in the same order as specified to
+  `qbvault.sh` (thus, thery are visible in `ps`'s output)
+* arguments collected by means of the `-l` option are passed to the
+  command through its standard input, one per line (i.e., separated by
+  new-lines), in the same order as specified to `qbvault.sh` (thus, they
+  are **not** visible in `ps`'s output)
+
+> **NOTE**: The `qbvault.sh` sample commands generated by the
+> `add_credentials.sh` script will only use the `-l` option to fill the
+> fields.
+> So you can just copy and paste them and they will work fine, whether
+> the fields require sensitive data or not.
+> However, if one or more fields require dynamic values you can compute,
+> then substitute the `-l` option with an apt `-c` option (and
+> corresponding `-l`/`-p` option(s) for the arguments).
+> Delete the `-n` and `-l` options of the fields you don't bother to
+> fill or whose dynamic value cannot be computed.
+
+To read (`-R`) the entries in the keystore, you may specify the URL of
+the page (`-u <page_url>`) whose entries should be read.
+
+When reading the entries for a specific URL, `qbvault.sh` will invoke
+any command present in the field specifications and return the computed
+values.
+To show the commands themselves, add `-r` (raw).
+
+If no URL is specified, all the entries are read, but, in this case, an
+implicit `-r` is assumed.
+
+To remove (`-D`) entries from the keystore, you must specify the URL of
+the page (`-u <page_url>`) whose entries must be removed.
 Optionally, you may remove only the entries of a specific form
-specifying its action URL (*form_action_url*).
+specifying its action URL (`-a <form_action_url>`).
 
-Finally, the `updatepassword` command allows you to change the
-passphrases used to encrypt `qbkey.gpg` and `qbvault.gpg`.
+The last operation, `-U`, allows you to change the passphrases used to
+encrypt `qbkey.gpg` and `qbvault.gpg`.
 
 Note that you will be only prompted to enter `qbkey.gpg`'s passphrase.
 `qbvault.gpg`'s passphrase -- that is, the content of `qbkey.gpg` -- is
