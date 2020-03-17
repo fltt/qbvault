@@ -91,9 +91,11 @@ The following are a few cases I stumbled on while testing them:
   be unable to access the forms
 * if the fields in the forms are renamed by a site update,
   `fill_credentials.sh` will be unable to find and fill them
-* if there are no forms, the scripts will be unable to work -- a few
-  sites out there make use of *Javascript* to store the data in
-  variables and then invoke the login service via *AJAX*
+* a few sites out there have form-less login pages that make use of
+  *Javascript* to store the data in variables and then invoke the login
+  service via *AJAX* -- although the scripts may be able to fill the
+  input fields the *Javascript* code may not be triggered making it
+  assume that no data were entered
 
 qbvault.sh
 ----------
@@ -139,6 +141,9 @@ To add (`-A`) new entries, you must specify:
     (`-c <command>`) and
   * the (optional) arguments for the command (`-p <command_argument>`
     and `-l <argument_label>`)
+
+> **NOTE**: If the page at the specified URL has no forms but only input
+> fields, use `x` as the value for `<form_action_url>`, i.e., `-a x`.
 
 Use `-l` to pass sensitive data, e.g., password, credit card numbers and
 the like.
