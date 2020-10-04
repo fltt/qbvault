@@ -214,7 +214,7 @@ if test -n "$ADD"; then
           label="$name"
         fi
         label=$(escape_blanks "$label")
-        echo "get_passphrase --data X X $label X" | "$GPG_CA" >"$TMP_FILE3"
+        echo "get_passphrase --data X X $label X" | "$GPG_CA" --decode >"$TMP_FILE3"
         if grep -q '^ERR ' "$TMP_FILE3"; then
           echo "Could not read user input:"
           cat "$TMP_FILE3"
@@ -246,7 +246,7 @@ if test -n "$ADD"; then
           label="Input line $j"
         fi
         label=$(escape_blanks "$label")
-        echo "get_passphrase --data X X $label X" | "$GPG_CA" >"$TMP_FILE3"
+        echo "get_passphrase --data X X $label X" | "$GPG_CA" --decode >"$TMP_FILE3"
         if grep -q '^ERR ' "$TMP_FILE3"; then
           echo "Could not read user input:"
           cat "$TMP_FILE3"
