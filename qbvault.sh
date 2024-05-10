@@ -49,10 +49,12 @@ usage() {
   echo
   echo "Usage:"
   echo "  $sn -A -u <url> [-a <action>]"
-  echo "  $ss {-n <name> [-p <value> |"
-  echo "  $ss             -l <label> |"
-  echo "  $ss             -c <command> [-p <argument> |"
-  echo "  $ss                           -l <label>] ...]} ..."
+  echo "  $ss {{-n <name> | -L <label> |"
+  echo "  $ss   -h <placeholder> | -i <id> |"
+  echo "  $ss   -t <type>} [-p <value> |"
+  echo "  $ss               -l <label> |"
+  echo "  $ss               -c <command> [-p <argument> |"
+  echo "  $ss                             -l <label>] ...]} ..."
   echo "  $sn -R [-u <url> [-r]]"
   echo "  $sn -D -u <url> [-a <action>]"
   echo "  $sn -U"
@@ -74,8 +76,8 @@ check_n_option() {
     eval "cmd=\$command_${n_names}"
     eval "nl=\$n_labels_${n_names}"
     eval "na=\$n_arguments_${n_names}"
-    if test -z "$cmd" && test $nl -eq 0 && test $na -eq 0; then
-      echo "Each -n option requires at least one -l, -p or -c option"
+    if test -z "$cmd" && test $nl -gt 0 && test $na -gt 0; then
+      echo "The -n, -L, -h, -i and -t options allow no more than one -l or -p option"
       usage
       exit 1
     fi
@@ -93,25 +95,31 @@ corrupt() {
 
 n_names=0
 # name_$i
+# type_$i
 # command_$i
 # n_labels_$i
 # label_$i_$j
 # n_arguments_$i
 # argument_$i_$j
 
-while getopts "Aa:n:l:c:p:Rru:DU" option; do
+while getopts "Aa:h:i:n:L:l:c:p:Rrt:u:DU" option; do
   case "$option" in
     A) only_one
        ADD=X
        REMOVE=X ;;
     a) ACTION="$OPTARG" ;;
-    n) check_n_option
+    n|L|h|i|t) check_n_option
        if test -z "$OPTARG"; then
          echo "Empty arg for -n option"
          usage
          exit 1
        fi
        n_names=$((n_names + 1))
+       if test "$option" = L; then
+         eval "type_${n_names}=\"l\""
+       else
+         eval "type_${n_names}=\"\$option\""
+       fi
        eval "n_labels_${n_names}=0"
        eval "n_arguments_${n_names}=0"
        eval "name_${n_names}=\"\$OPTARG\"" ;;
@@ -121,6 +129,17 @@ while getopts "Aa:n:l:c:p:Rru:DU" option; do
        eval "label_${n_names}_${nl}=\"\$OPTARG\"" ;;
     c) if test -z "$OPTARG"; then
          echo "Empty -c option argument"
+         usage
+         exit 1
+       fi
+       if test $n_names -eq 0; then
+         echo "The -c option must follow a -n, -L, -h, -i or -t option"
+         usage
+         exit 1
+       fi
+       eval "cmd=\$command_${n_names}"
+       if test -n "$cmd"; then
+         echo "The -n, -L, -h, -i and -t options require no more than one -c option"
          usage
          exit 1
        fi
@@ -201,12 +220,13 @@ if test -n "$ADD"; then
   while test $i -lt $n_names; do
     i=$((i + 1))
     eval "name=\"\$name_${i}\""
+    eval "type=\"\$type_${i}\""
     eval "cmd=\"\$command_${i}\""
     if test -z "$cmd"; then
       eval "na=\$n_arguments_${i}"
       if test $na -gt 0; then
         eval "argument=\"\$argument_${i}_1\""
-        echo "n $name" >>"$TMP_FILE2"
+        echo "$type $name" >>"$TMP_FILE2"
         echo "v $argument" >>"$TMP_FILE2"
       else
         eval "label=\"\$label_${i}_1\""
@@ -221,14 +241,14 @@ if test -n "$ADD"; then
           exit 0
         fi
         if grep -q '^D ' "$TMP_FILE3"; then
-          echo "n $name" >>"$TMP_FILE2"
+          echo "$type $name" >>"$TMP_FILE2"
           sed -ne 's,^D \(.*\)$,v \1,p' "$TMP_FILE3" >>"$TMP_FILE2"
         else
           echo "Skipping field \"$name\"."
         fi
       fi
     else
-      echo "n $name" >>"$TMP_FILE2"
+      echo "$type $name" >>"$TMP_FILE2"
       echo "c $cmd" >>"$TMP_FILE2"
       eval "na=\$n_arguments_${i}"
       j=0
@@ -243,7 +263,7 @@ if test -n "$ADD"; then
         j=$((j + 1))
         eval "label=\"\$label_${i}_${j}\""
         if test -z "$label"; then
-          label="Input line $j"
+          label="$name's command input line $j"
         fi
         label=$(escape_blanks "$label")
         echo "get_passphrase --data X X $label X" | "$GPG_CA" --decode >"$TMP_FILE3"
@@ -290,8 +310,10 @@ else
       echo "$action"
       read token data
       while test -n "$token"; do
-        test "$token" = n || corrupt
-        echo "$data"
+        case "$token" in
+          n|l|h|i|t) echo "$token $data" ;;
+          *) corrupt ;;
+        esac
         cmd=""
         input=""
         while true; do
