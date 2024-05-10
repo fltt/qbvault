@@ -15,7 +15,7 @@ The scripts require:
 * `sha256`
 * a bunch of utils any modern Unix OS has (`sh`, `sed`, `grep`, etc.)
 
-I've tested these scripts in *FreeBSD*.
+I've tested these scripts on *FreeBSD*.
 With other OSes you may need to tweak them: e.g., in *Linux*
 distributions the `sha256` utility is usually called `sha256sum`.
 
@@ -61,13 +61,13 @@ For each form, a `qbvault.sh` command will be prepared -- choose the
 one(s) relevant to you.
 
 If it is the first time you run `qbvault.sh`, you will be asked to enter
-(twice) a passphrase to create a new keystore.
+twice a passphrase to create a new keystore.
 Else it may ask you to enter (once) the passphrase to unlock the
 keystore.
 The script then will ask you to enter the values for all the input
 fields, in turn.
 
-> **NOTE**: Hidden and submit fields are ignored.
+> **NOTE**: Hidden and submit input fields are ignored.
 
 If you don't want to specify a value for some field, just leave it blank
 and press `Enter` (or the `OK` button).
@@ -90,12 +90,19 @@ The following are a few cases I stumbled on while testing them:
   domain name than the main page, the `add_credentials.sh` script will
   be unable to access the forms
 * if the fields in the forms are renamed by a site update,
-  `fill_credentials.sh` will be unable to find and fill them
-* a few sites out there have form-less login pages that make use of
-  *Javascript* to store the data in variables and then invoke the login
-  service via *AJAX* -- although the scripts may be able to fill the
-  input fields the *Javascript* code may not be triggered making it
-  assume that no data were entered
+  `fill_credentials.sh` will be unable to find and fill them (or may
+  fill the wrong ones)
+* there are sites out there that make use of *Javascript* to read the
+  data from the input fields when events are fired -- although the
+  scripts may be able to fill the input fields, the *Javascript* code
+  may not be triggered making it assume that no data were entered
+
+If you stumble in sites like the ones described in the last point, try
+adding a char to the scripts-inserted value and then deleting it.
+
+> **NOTE:** I've tried to fake those events, but it looks like the
+> *Javascript* in those sites check for the `isTrusted` attribute, which
+> synthesized events lack.
 
 qbvault.sh
 ----------
@@ -116,10 +123,12 @@ and update password (`-U`):
 
 ```
 qbvault.sh -A -u <page_url> [-a <form_action_url>]
-           {-n <field_name> [-p <field_value> |
-                             -l <field_label> |
-                             -c <command> [-p <command_argument> |
-                                           -l <argument_label>] ...]} ...
+           {{-n <field_name> | -L <field_label> |
+             -h <placeholder> | -i <dom_element_id> |
+             -t <input_type>} [-p <field_value> |
+                               -l <field_description> |
+                               -c <command> [-p <command_argument> |
+                                             -l <argument_description>] ...]} ...
 qbvault.sh -R [-u <page_url> [-r]]
 qbvault.sh -D -u <page_url> [-a <form_action_url>]
 qbvault.sh -U
@@ -130,26 +139,52 @@ To add (`-A`) new entries, you must specify:
 * the URL of the page containing the forms to fill (`-u <page_url>`)
 * the URL in the action attribute of the form (`-u <form_action_url>`)
   -- this is used to identify the form to fill
-* and for each field to fill, the name of the field (`-n <field_name>`)
-  and:
+* and for each field to fill, the name of the field (`-n <field_name>`),
+  its label (`-L <field_label>`), placeholder (`-h <placeholder>`), DOM
+  id (`-i <dom_element_id>`) or "enumerated type" (`-t <input_type>`,
+  see below), and:
 
   * the value of the field (`-p <field_value>`), or
-  * the label to be shown to the user by `gpg-agent`
-    (`-l <field_label>`) -- if empty `<field_name>` will be used
+  * the description to be shown to the user by `gpg-agent`
+    (`-l <field_description>`) -- if empty `<field_name>` will be used
     instead, or
   * the command to run to compute the value to be used for the field
     (`-c <command>`) and
   * the (optional) arguments for the command (`-p <command_argument>`
-    and `-l <argument_label>`)
+    and `-l <argument_description>`)
 
 > **NOTE**: If the page at the specified URL has no forms but only input
 > fields, use `x` as the value for `<form_action_url>`, i.e., `-a x`.
 
-Use `-l` to pass sensitive data, e.g., password, credit card numbers and
-the like.
+The "enumerated type" is *only* used to reference those input field that
+cannot otherwise be referenced.
+It may seem pointless to have fields in a form without name, label,
+placeholder or id, yet there are several sites out there with such
+"unreferentiable" fields.
+
+So, to deal with such fields, we reference them by type.
+However, what do we do if there are more than one unreferentiable input
+fields of the same type?
+We append a suffix made of a "#" (number sign) followed by an ordinal
+number.
+For example, say we have three unreferentiable text input fields.
+The first will be referenced by `-t text`, the second by `-t "text#2"`,
+and the third by `-t "text#3"`.
+
+Remember, this apply only to unreferentiable input fields.
+All the other fields must be referenced by name, label, placeholder or
+id.
+
+> **NOTE:** The `-t` option is a last resort to deal with badly written
+> input forms -- if your browser is not consistent in traversing the DOM
+> tree or if the fields are rearranged, the scripts may reference the
+> wrong fields.
+
+Use the `-l` option to pass sensitive data, e.g., password, credit card
+numbers and the like.
 Use `-p` for non-sensitive ones.
-Or use `-c` if the value is dynamic and can be computed by running a
-script or command (e.g., OTP tokens).
+Or use `-c` if the value is dynamic and can/must be computed by running
+a script or command (e.g., OTP tokens).
 If the value is dynamic but cannot be computed, then I guess you should
 ignore the field in question and just skip it.
 
@@ -170,7 +205,7 @@ Standard error will pass-through to `qbvault.sh` standard error output.
 As for the command arguments, they are specified by means of the `-l`
 and `-p` options.
 Everything said above about the `-l` and `-p` options, apply to the
-command arguments as well, with the following clarifications:
+command arguments as well, with the addition of the following notes:
 
 * multiple `-p` and `-l` can be specified
 * arguments specified by means of the `-p` option are passed to the
